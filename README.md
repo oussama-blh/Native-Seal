@@ -33,7 +33,7 @@
 - Time taken for image encryption: 1915 milliseconds  
 - Time taken for image encryption: 1827 milliseconds  
 
-# Time taken by the inference  :
+# 3) Time taken by the inference  :
 
 ## For the first convolutional layer :
 

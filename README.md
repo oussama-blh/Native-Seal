@@ -1,5 +1,8 @@
 # 1) Time Taken for Encoding the First Convolution Layer Weights
 
+## For Python Notebook  
+**Time taken:** 250 milliseconds  
+
 ## Without Parallelization  
 **Time taken:** 373 milliseconds  
 
@@ -15,6 +18,9 @@
 - Time taken for weights encoding: 40 milliseconds  
 
 # 2) Time Taken for Image Encryption
+
+## For Python Notebook  
+**Time taken:** 6980 milliseconds  
 
 ## Without Parallelization  
 **Time taken for image encryption:** 12,365 milliseconds  

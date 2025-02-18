@@ -1,4 +1,4 @@
-# Time Taken for Encoding the First Convolution Layer Weights
+# 1) Time Taken for Encoding the First Convolution Layer Weights
 
 ## Without Parallelization  
 **Time taken:** 373 milliseconds  

@@ -9,7 +9,7 @@
 #include <convolution/convolution.h>
 #include <linear/linear.h>
 #include <functions/square.h>
-
+#include <pooling/avgPooling.h>
 // Structure for convolutional layer weights
 struct ConvLayerWeights {
     std::vector<std::vector<std::vector<std::vector<float>>>> weights;
@@ -124,7 +124,7 @@ std::vector<std::vector<std::vector<std::vector<double>>>> tensorTo4DVector(torc
 
 
 int main() {
-    const std::string MODEL_PATH = "C:/Khbich/PFE/Implementations/NativeSEAL/models/Lenet1_traced.pt";
+    const std::string MODEL_PATH = "/home/oussama/Documents/PFE/Implementations/NativeSEAL/models/Lenet1_traced.pt";
     
     // Extract layer weights
     std::unordered_map<std::string, LayerParameters> layerMap = extractWeightsAndBiases(MODEL_PATH);
@@ -135,7 +135,7 @@ int main() {
     he.generate_relin_keys();
     
     // 2) Load a real MNIST image
-    std::string dataset_path = "C:/Khbich/PFE/Implementations/NativeSEAL/data/MNIST/raw";
+    std::string dataset_path = "/home/oussama/Documents/PFE/Implementations/NativeSEAL/data/MNIST/raw";
     auto train_dataset = torch::data::datasets::MNIST(dataset_path)
         .map(torch::data::transforms::Normalize<>(0.1307, 0.3081))  // Normalize
         .map(torch::data::transforms::Stack<>());
@@ -152,16 +152,35 @@ int main() {
 
     // Convert to 4D vector
     auto inputDouble = tensorTo4DVector(image_tensor);
-
-    // auto outputEnc1;
+    
+    // Clear the tensor and other unused variables
+    // image_tensor.reset();  // Frees the memory used by image_tensor
+    // train_loader.reset();  // Frees memory used by train_loader
 
     // Encrypt the input image
     std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> inputEnc(1);
     inputEnc[0].resize(1);
+
+    // duration measurement
+    auto startImg = std::chrono::high_resolution_clock::now();
+    
+    //  Encrypt the MNIST image
     inputEnc[0][0] = he.encryptMatrix2D(inputDouble[0][0]); // Encrypt the MNIST image
 
+    auto endImg = std::chrono::high_resolution_clock::now();
+
+    // For milliseconds:
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(endImg - startImg);
+    std::cout << "Time taken for image encryption is: " << duration_ms.count() << " milliseconds" << std::endl;
+    
+
+    // free memory of vectors
+    // inputDouble.clear();
+    // inputDouble.shrink_to_fit();
+    
     // Retrieve convolutional and linear layer parameters by index
     std::string convLayerId = "0";  // First convolutional layer
+    std::string convLayer2ID = "3";  // Square layer
     std::string linearLayerId = "7";  // Fully connected layer
 
     std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> outputEnc1;
@@ -192,7 +211,7 @@ int main() {
             Conv2d convLayer(
                 he, convertedWeights, 
                 std::make_pair(1, 1),  // Stride
-                std::make_pair(1, 1),  // Padding
+                std::make_pair(0, 0),  // Padding
                 convertedBias
             );
 
@@ -229,9 +248,89 @@ int main() {
     //Apply SquareLayer after the first convolution
     auto squareLayer = SquareLayer(he);
 
-    auto squaredEnc = squareLayer(outputEnc1);
+    squareLayer(outputEnc1);
+    
+    
+    std::cout << "AvgPooling Layer !" << std::endl;
 
-    // auto &out2D = squaredEnc[0][0];
+    // duration measurement
+    auto startPooling = std::chrono::high_resolution_clock::now();
+
+    // Define Avg Pooling Layer (2x2 kernel, stride=2, padding=0)
+    AvgPoolLayer avgPool(he, {2, 2}, {2, 2}, {0, 0});
+    
+    // Apply Avg Pooling on First  convolution output
+    outputEnc1 = avgPool(outputEnc1);
+
+    auto endPooling = std::chrono::high_resolution_clock::now();
+
+    // For milliseconds:
+    duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(endPooling - startPooling);
+    std::cout << "Time taken for the AvgPooling Layer: " << duration_ms.count() << " milliseconds" << std::endl;
+    
+
+    // **Initialize Convolutional Layer 2**
+    if (layerMap.find(convLayer2ID) != layerMap.end()) {
+        LayerParameters& convLayerParams = layerMap[convLayer2ID];
+
+        if (convLayerParams.isConv) {
+            std::vector<std::vector<std::vector<std::vector<double>>>> convertedWeights(
+                convLayerParams.conv.weights.size()
+            );
+
+            for (size_t i = 0; i < convLayerParams.conv.weights.size(); i++) {
+                convertedWeights[i].resize(convLayerParams.conv.weights[i].size());
+                for (size_t j = 0; j < convLayerParams.conv.weights[i].size(); j++) {
+                    convertedWeights[i][j].resize(convLayerParams.conv.weights[i][j].size());
+                    for (size_t k = 0; k < convLayerParams.conv.weights[i][j].size(); k++) {
+                        convertedWeights[i][j][k].resize(convLayerParams.conv.weights[i][j][k].size());
+                        for (size_t l = 0; l < convLayerParams.conv.weights[i][j][k].size(); l++) {
+                            convertedWeights[i][j][k][l] = static_cast<double>(convLayerParams.conv.weights[i][j][k][l]);
+                        }
+                    }
+                }
+            }
+            std::vector<double> convertedBias(convLayerParams.bias.begin(), convLayerParams.bias.end());
+
+            // Create convolutional layer
+            Conv2d convLayer(
+                he, convertedWeights, 
+                std::make_pair(1, 1),  // Stride
+                std::make_pair(0, 0),  // Padding
+                convertedBias
+            );
+
+            std::cout << "Initialized Conv Layer 3!" << std::endl;
+
+            // duration measurement
+            auto start = std::chrono::high_resolution_clock::now();
+    
+            //  Apply first convolution layer
+            outputEnc1 = convLayer(outputEnc1);
+
+            auto end = std::chrono::high_resolution_clock::now();
+
+            // For milliseconds:
+            auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            std::cout << "Time taken for the second conv Layer: " << duration_ms.count() << " milliseconds" << std::endl;
+            
+            // 8) Decrypt and print the final convolution result
+            // auto &out2D = outputEnc1[0][0];
+            // int outHeight = static_cast<int>(out2D.size());
+            // int outWidth  = (outHeight > 0) ? static_cast<int>(out2D[0].size()) : 0;
+
+            // std::cout << "\n First Decrypted Convolution Output:\n";
+            // for (int y = 0; y < outHeight; y++) {
+            //     for (int x = 0; x < outWidth; x++) {
+            //         double val = he.decrypt(out2D[y][x]);
+            //         std::cout << std::setw(6) << val << " ";
+            //     }
+            //     std::cout << std::endl;
+            // }
+        }
+    }
+
+    // auto &out2D = outputEnc1[0][0];
     // int outHeight = static_cast<int>(out2D.size());
     // int outWidth  = (outHeight > 0) ? static_cast<int>(out2D[0].size()) : 0;
 
@@ -246,24 +345,24 @@ int main() {
 
 
     // **Step 2: Initialize Fully Connected (Linear) Layer**
-    if (layerMap.find(linearLayerId) != layerMap.end()) {
-        LayerParameters& linearLayerParams = layerMap[linearLayerId];
+    // if (layerMap.find(linearLayerId) != layerMap.end()) {
+    //     LayerParameters& linearLayerParams = layerMap[linearLayerId];
 
-        if (!linearLayerParams.isConv) {
-            std::vector<std::vector<double>> convertedWeights(linearLayerParams.linear.weights.size());
-            for (size_t i = 0; i < linearLayerParams.linear.weights.size(); i++) {
-                convertedWeights[i].resize(linearLayerParams.linear.weights[i].size());
-                for (size_t j = 0; j < linearLayerParams.linear.weights[i].size(); j++) {
-                    convertedWeights[i][j] = static_cast<double>(linearLayerParams.linear.weights[i][j]);
-                }
-            }
-            std::vector<double> convertedBias(linearLayerParams.bias.begin(), linearLayerParams.bias.end());
+    //     if (!linearLayerParams.isConv) {
+    //         std::vector<std::vector<double>> convertedWeights(linearLayerParams.linear.weights.size());
+    //         for (size_t i = 0; i < linearLayerParams.linear.weights.size(); i++) {
+    //             convertedWeights[i].resize(linearLayerParams.linear.weights[i].size());
+    //             for (size_t j = 0; j < linearLayerParams.linear.weights[i].size(); j++) {
+    //                 convertedWeights[i][j] = static_cast<double>(linearLayerParams.linear.weights[i][j]);
+    //             }
+    //         }
+    //         std::vector<double> convertedBias(linearLayerParams.bias.begin(), linearLayerParams.bias.end());
 
-            // Create linear layer
-            LinearLayer linearLayer(he, convertedWeights, convertedBias);
-            std::cout << "Initialized Linear Layer 3!" << std::endl;
-        }
-    }
+    //         // Create linear layer
+    //         LinearLayer linearLayer(he, convertedWeights, convertedBias);
+    //         std::cout << "Initialized Linear Layer 3!" << std::endl;
+    //     }
+    // }
 
     return 0;
 }

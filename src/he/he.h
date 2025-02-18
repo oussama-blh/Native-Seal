@@ -45,15 +45,15 @@ public:
     double decrypt(const seal::Ciphertext &ciphertext);
     
     // 1D: Encode each double into a separate Plaintext
-    std::vector<seal::Plaintext> CKKSPyfhel::encodeVector1D(const std::vector<double> &values);
+    std::vector<seal::Plaintext> encodeVector1D(const std::vector<double> &values);
     // 2D: Encode each row by calling encodeVector1D
-    std::vector<std::vector<seal::Plaintext>> CKKSPyfhel::encodeMatrix2D(const std::vector<std::vector<double>> &mat);
+    std::vector<std::vector<seal::Plaintext>> encodeMatrix2D(const std::vector<std::vector<double>> &mat);
 
     // 1D: Encrypt each double into a separate Ciphertext
-    std::vector<seal::Ciphertext> CKKSPyfhel::encryptVector1D(const std::vector<double> &values);
+    std::vector<seal::Ciphertext> encryptVector1D(const std::vector<double> &values);
 
     // 2D: Encrypt each element in each row
-    std::vector<std::vector<seal::Ciphertext>> CKKSPyfhel::encryptMatrix2D(const std::vector<std::vector<double>> &mat);    
+    std::vector<std::vector<seal::Ciphertext>> encryptMatrix2D(const std::vector<std::vector<double>> &mat);    
 
     // Decode 1D array of Plaintext -> 1D array of double
     std::vector<double> decodeVector1D(const std::vector<seal::Plaintext> &encodedVec);

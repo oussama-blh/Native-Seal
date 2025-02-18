@@ -1,6 +1,7 @@
 #include "square.h"
 #include <stdexcept>
 #include <iostream>
+#include <omp.h>
 
 SquareLayer::SquareLayer(CKKSPyfhel &he) : he_(he) {
     // Ensure relinearization keys exist
@@ -10,67 +11,39 @@ SquareLayer::SquareLayer(CKKSPyfhel &he) : he_(he) {
     relin_keys_ = he_.get_relin_keys();
 }
 
-// Perform square operation on a single ciphertext
-seal::Ciphertext SquareLayer::square(const seal::Ciphertext &ct) {
-    seal::Ciphertext squared_ct;
-
-    // Ensure deep copy by explicitly creating a new ciphertext
-    seal::Ciphertext temp_ct;
-    temp_ct = ct;  
+// Perform square operation on a single ciphertext in place
+void SquareLayer::square_inplace(seal::Ciphertext &ct) {
 
     // Apply square operation
-    he_.evaluator_->square(temp_ct, squared_ct);
+    he_.evaluator_->square(ct, ct);  // Modify the original ciphertext `ct` in place
     
     // Relinearize using pre-stored keys
-    he_.evaluator_->relinearize_inplace(squared_ct, relin_keys_);
+    he_.evaluator_->relinearize_inplace(ct, relin_keys_);
 
     // Rescale only if necessary
-    if (squared_ct.is_ntt_form()) {
-        he_.evaluator_->rescale_to_next_inplace(squared_ct);
+    if (ct.is_ntt_form()) {
+        he_.evaluator_->rescale_to_next_inplace(ct);
     }
-
-    return squared_ct;  // Return a fresh ciphertext
 }
 
-// Square operation on a 1D vector (DOES NOT MODIFY INPUT)
-std::vector<seal::Ciphertext> SquareLayer::operator()(const std::vector<seal::Ciphertext> &input) {
-    std::vector<seal::Ciphertext> output;
-    output.reserve(input.size());
-
-    for (const auto &ct : input) {
-        output.emplace_back(square(ct));  // Use emplace_back for efficiency
+// Square operation on a 1D vector (modifies input directly)
+void SquareLayer::operator()(std::vector<seal::Ciphertext> &input) {
+    for (auto &ct : input) {
+        square_inplace(ct);  // Modify input directly
     }
-
-    return output;  // Return a new vector
 }
 
-// Square operation on a 4D tensor (Ensuring Full Deep Copy)
-std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> 
-SquareLayer::operator()(const std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> &input) 
-{
-    // Create a NEW 4D tensor
-    std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> output;
-
-    output.resize(input.size());
-
+// Square operation on a 4D tensor (modifies input directly)
+void SquareLayer::operator()(std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> &input) {
+    // Use index-based loops with collapse(4) to parallelize all four nested loops
+    #pragma omp parallel for collapse(4)
     for (size_t i = 0; i < input.size(); i++) {
-        output[i].resize(input[i].size());
         for (size_t j = 0; j < input[i].size(); j++) {
-            output[i][j].resize(input[i][j].size());
             for (size_t k = 0; k < input[i][j].size(); k++) {
-                output[i][j][k].resize(input[i][j][k].size());
-
                 for (size_t l = 0; l < input[i][j][k].size(); l++) {
-                    // Create a deep copy before squaring
-                    seal::Ciphertext temp_ct;
-                    temp_ct = input[i][j][k][l];  // Explicitly copy input value
-                    
-                    // Store squared value in a new object
-                    output[i][j][k][l] = square(temp_ct);
+                    square_inplace(input[i][j][k][l]);
                 }
             }
         }
     }
-
-    return output;  // Return a deep-copied 4D tensor
 }

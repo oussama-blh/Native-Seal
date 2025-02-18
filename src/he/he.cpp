@@ -1,9 +1,9 @@
 #include "he.h"
-
 #include <iostream>
 #include <stdexcept>
 #include <cmath>
 #include <sstream>
+#include <omp.h>
 
 CKKSPyfhel::CKKSPyfhel(std::size_t poly_modulus_degree,
                        double scale,
@@ -112,6 +112,7 @@ double CKKSPyfhel::decrypt(const seal::Ciphertext &ciphertext)
 std::vector<seal::Plaintext> CKKSPyfhel::encodeVector1D(const std::vector<double> &values)
 {
     std::vector<seal::Plaintext> encoded(values.size());
+    #pragma omp parallel for
     for (size_t i = 0; i < values.size(); i++)
     {
         encoded[i] = encode(values[i]); // uses encode(double) internally
@@ -123,6 +124,7 @@ std::vector<seal::Plaintext> CKKSPyfhel::encodeVector1D(const std::vector<double
 std::vector<std::vector<seal::Plaintext>> CKKSPyfhel::encodeMatrix2D(const std::vector<std::vector<double>> &mat)
 {
     std::vector<std::vector<seal::Plaintext>> encoded(mat.size());
+    #pragma omp parallel for
     for (size_t r = 0; r < mat.size(); r++)
     {
         encoded[r] = encodeVector1D(mat[r]);
@@ -134,6 +136,7 @@ std::vector<std::vector<seal::Plaintext>> CKKSPyfhel::encodeMatrix2D(const std::
 std::vector<seal::Ciphertext> CKKSPyfhel::encryptVector1D(const std::vector<double> &values)
 {
     std::vector<seal::Ciphertext> encrypted(values.size());
+    #pragma omp parallel for
     for (size_t i = 0; i < values.size(); i++)
     {
         encrypted[i] = encrypt(values[i]); // uses encrypt(double) internally
@@ -145,6 +148,7 @@ std::vector<seal::Ciphertext> CKKSPyfhel::encryptVector1D(const std::vector<doub
 std::vector<std::vector<seal::Ciphertext>> CKKSPyfhel::encryptMatrix2D(const std::vector<std::vector<double>> &mat)
 {
     std::vector<std::vector<seal::Ciphertext>> encrypted(mat.size());
+    #pragma omp parallel for
     for (size_t r = 0; r < mat.size(); r++)
     {
         encrypted[r] = encryptVector1D(mat[r]);

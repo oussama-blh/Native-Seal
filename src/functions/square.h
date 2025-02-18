@@ -9,17 +9,18 @@ class SquareLayer {
 public:
     explicit SquareLayer(CKKSPyfhel &he);
 
-    // Applies the square function on encrypted tensors
-    std::vector<seal::Ciphertext> operator()(const std::vector<seal::Ciphertext> &input);
+    // Applies the square function in-place on a 1D vector of encrypted ciphertexts
+    void operator()(std::vector<seal::Ciphertext> &input);
 
-    std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> 
-    operator()(const std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> &input);
+    // Applies the square function in-place on a 4D tensor of encrypted ciphertexts
+    void operator()(std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>> &input);
 
 private:
     CKKSPyfhel &he_;
     seal::RelinKeys relin_keys_;
-    // Function to perform element-wise square
-    seal::Ciphertext square(const seal::Ciphertext &ct);
+    
+    // Function to perform the square operation in-place
+    void square_inplace(seal::Ciphertext &ct);
 };
 
 #endif // SQUARE_LAYER_H

@@ -1,4 +1,4 @@
-#include "pooling/AdaptiveAvgPooling.h"
+#include "adaptiveAvgPooling.h"
 #include <stdexcept>
 #include <iostream>
 

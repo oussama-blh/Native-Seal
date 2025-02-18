@@ -2,6 +2,7 @@
 #include <stdexcept>   // for exceptions
 #include <iostream>    // for debug prints (optional)
 #include <chrono>
+#include <omp.h>
 
 // Helper: multiply ciphertext by plaintext, returning a new ciphertext.
 // Multiply a batch of ciphertexts by a batch of plaintexts in parallel
@@ -22,7 +23,6 @@ static std::vector<seal::Ciphertext> multiply_ciphertext_plain_batch(
         seal::Plaintext pt_aligned = pt_vec[i];
         he.evaluator_->mod_switch_to_inplace(pt_aligned, ct_vec[i].parms_id());
         pt_aligned.scale() = ct_vec[i].scale();
-
         he.evaluator_->multiply_plain(ct_vec[i], pt_aligned, result[i]);
         he.evaluator_->rescale_to_next_inplace(result[i]);
     }
@@ -44,18 +44,29 @@ Conv2d::Conv2d(
 {
     // Encode the 4D weights as Plaintext.
     // Expected shape: [n_filters][n_input_channels][kernel_height][kernel_width]
-    weights_.resize(weights.size());  // n_filters
-    for (size_t f = 0; f < weights.size(); f++)
-    {
-        weights_[f].resize(weights[f].size()); // n_input_channels
-        for (size_t in_c = 0; in_c < weights[f].size(); in_c++)
-        {
-            weights_[f][in_c].resize(weights[f][in_c].size()); // kernel height
-            for (size_t y = 0; y < weights[f][in_c].size(); y++)
-            {
-                weights_[f][in_c][y].resize(weights[f][in_c][y].size()); // kernel width
-                for (size_t x = 0; x < weights[f][in_c][y].size(); x++)
-                {
+
+    // duration measurement
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // Perform resizing before parallel execution
+    weights_.resize(weights.size());
+    #pragma omp parallel for
+    for (size_t f = 0; f < weights.size(); f++) {
+        weights_[f].resize(weights[f].size());
+        for (size_t in_c = 0; in_c < weights[f].size(); in_c++) {
+            weights_[f][in_c].resize(weights[f][in_c].size());
+            for (size_t y = 0; y < weights[f][in_c].size(); y++) {
+                weights_[f][in_c][y].resize(weights[f][in_c][y].size());
+            }
+        }
+    }
+
+    //the parallel loop to encode the weights
+    #pragma omp parallel for collapse(4)
+    for (size_t f = 0; f < weights.size(); f++) {
+        for (size_t in_c = 0; in_c < weights[f].size(); in_c++) {
+            for (size_t y = 0; y < weights[f][in_c].size(); y++) {
+                for (size_t x = 0; x < weights[f][in_c][y].size(); x++) {
                     double w = weights[f][in_c][y][x];
                     weights_[f][in_c][y][x] = he_.encode(w);
                 }
@@ -67,11 +78,19 @@ Conv2d::Conv2d(
     if (!bias.empty())
     {
         bias_.resize(bias.size());
+        #pragma omp parallel for
         for (size_t i = 0; i < bias.size(); i++)
         {
             bias_[i] = he_.encode(bias[i]);
         }
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    // For milliseconds:
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    std::cout << "Time taken for weights encoding: " << duration_ms.count() << " milliseconds" << std::endl;
+
 }
 
 std::vector<std::vector<std::vector<std::vector<seal::Ciphertext>>>>
@@ -115,16 +134,28 @@ Conv2d::operator()(const std::vector<std::vector<std::vector<std::vector<seal::C
                         }
                     }
                 }
+
+                // conv_layer.clear();
+                // conv_layer.shrink_to_fit();
             }
 
             // Add bias for this output channel if provided.
             if (!bias_.empty()) {
                 auto &bias_pt = bias_[f];
-                for (auto &row : filter_sum_2d) {
-                    for (auto &ciph : row) {
-                        he_.evaluator_->mod_switch_to_inplace(bias_pt, ciph.parms_id());
-                        bias_pt.scale() = ciph.scale();
-                        he_.evaluator_->add_plain_inplace(ciph, bias_pt);
+            
+                // Parallelize the nested loops
+                #pragma omp parallel for collapse(2)
+                for (size_t i = 0; i < filter_sum_2d.size(); ++i) {
+                    for (size_t j = 0; j < filter_sum_2d[i].size(); ++j) {
+                        auto &ciph = filter_sum_2d[i][j];
+            
+                        // OpenMP threads may cause race conditions if bias_pt is modified in place
+                        // Ensure thread safety by working on a thread-local copy
+                        auto bias_pt_local = bias_pt;
+            
+                        he_.evaluator_->mod_switch_to_inplace(bias_pt_local, ciph.parms_id());
+                        bias_pt_local.scale() = ciph.scale();
+                        he_.evaluator_->add_plain_inplace(ciph, bias_pt_local);
                     }
                 }
             }
@@ -132,10 +163,20 @@ Conv2d::operator()(const std::vector<std::vector<std::vector<std::vector<seal::C
             std::cout << "Done \n" ;
             // Store the result for this output channel.
             result[img][f] = filter_sum_2d;
+
+            // Free memory
+            // for (auto& row : filter_sum_2d) {
+            //     row.clear();  // Clear each inner vector
+            //     row.shrink_to_fit();  // Free inner memory
+            // }
+            // filter_sum_2d.clear();  // Clear the outer vector
+            // filter_sum_2d.shrink_to_fit();  // Free outer memory
         }
     }
 
-    
+
+    // padded_input.clear();
+    // padded_input.shrink_to_fit();
     return result;
 }
 
@@ -221,7 +262,7 @@ std::vector<std::vector<seal::Ciphertext>> convolute2d(
     seal::Ciphertext zero_ct = he.encrypt(0.0);
 
     // Process the image in parallel for each output position
-    #pragma omp parallel for
+    #pragma omp parallel for collapse(2)
     for (int oy = 0; oy < y_out; oy++)
     {
         for (int ox = 0; ox < x_out; ox++)
@@ -257,6 +298,15 @@ std::vector<std::vector<seal::Ciphertext>> convolute2d(
             }
 
             result[oy][ox] = std::move(accum_ct);
+
+            // Explicitly free memory before next iteration
+            // image_patch.clear();
+            // image_patch.shrink_to_fit();
+            // filter_patch.clear();
+            // filter_patch.shrink_to_fit();
+            // products.clear();         
+            // products.shrink_to_fit(); 
+
         }
     }
 

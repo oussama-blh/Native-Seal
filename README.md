@@ -18,7 +18,7 @@
 - Time taken for weights encoding: 40 milliseconds  
 - Time taken for weights encoding: 35 milliseconds
 - Time taken for weights encoding: 44 milliseconds
-- 
+
 # 2) Time Taken for Image Encryption
 
 ## For Python Notebook  
